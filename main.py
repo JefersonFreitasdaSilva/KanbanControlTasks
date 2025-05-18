@@ -29,6 +29,8 @@ tarefa_arrastada = None
 widget_fantasma = None
 coluna_arrastada = None
 widget_fantasma_coluna = None
+ANIMATION_DURATION = 400  # Animation duration in milliseconds
+ANIMATION_STEPS = 20     # Number of animation steps for smooth movement
 CORES_PASTEL = {
     "To Do": "#B3E5FC",
     "In Progress": "#C8E6C9",
@@ -719,9 +721,12 @@ def soltar_coluna(event, estado):
                 idx += 1
             estados.insert(idx, estado)
             salvar_configuracoes(GOOGLE_SHEETS_URL, estados, CORES_COLUNAS)
-            reordenar_colunas()
+            # Animate column reordering instead of instant repack
+            animar_colunas()
             texto_detalhes.delete("1.0", tk.END)
             texto_detalhes.insert(tk.END, f"Coluna '{estado}' movida para a posição de '{nova_posicao}'.\n", "info")
+            # Sync with Google Sheets
+            enviar_tarefas_planilha()
     except Exception as e:
         print(f"[ERROR] Erro ao soltar coluna {estado}: {e}")
         texto_detalhes.delete("1.0", tk.END)
@@ -731,6 +736,89 @@ def soltar_coluna(event, estado):
             widget_fantasma_coluna.destroy()
             widget_fantasma_coluna = None
         coluna_arrastada = None
+
+# New function to animate column transitions
+def animar_colunas():
+    global layout_lock
+    if layout_lock:
+        return
+    layout_lock = True
+    try:
+        # Store initial and target positions
+        coluna_width = 150 + 10  # Width + padding
+        initial_positions = {estado: colunas[estado]["frame_coluna"].winfo_x() for estado in colunas}
+        target_positions = {estado: idx * coluna_width for idx, estado in enumerate(estados)}
+
+        # Switch to place geometry manager for animation
+        for estado in colunas:
+            colunas[estado]["frame_coluna"].pack_forget()
+            colunas[estado]["frame_coluna"].place(x=initial_positions[estado], y=5, width=150, height=colunas[estado]["frame_coluna"].winfo_height())
+
+        def animate_step(step):
+            if step > ANIMATION_STEPS:
+                # Animation complete, restore pack layout
+                for estado in colunas:
+                    colunas[estado]["frame_coluna"].place_forget()
+                reordenar_colunas_post_animation()
+                return
+            fraction = step / ANIMATION_STEPS
+            for estado in colunas:
+                if not colunas[estado]["frame_coluna"].winfo_exists():
+                    continue
+                current_x = initial_positions[estado] + (target_positions[estado] - initial_positions[estado]) * fraction
+                colunas[estado]["frame_coluna"].place(x=current_x, y=5)
+            janela.after(ANIMATION_DURATION // ANIMATION_STEPS, lambda: animate_step(step + 1))
+
+        # Start animation
+        animate_step(1)
+    except Exception as e:
+        print(f"[ERROR] Erro ao animar colunas: {e}")
+        texto_detalhes.delete("1.0", tk.END)
+        texto_detalhes.insert(tk.END, f"⚠️ Erro ao animar colunas: {e}\n", "info")
+        # Fallback to instant reordering
+        reordenar_colunas_post_animation()
+    finally:
+        layout_lock = False
+
+# Modified reordenar_colunas to work post-animation
+def reordenar_colunas_post_animation():
+    global layout_lock
+    if layout_lock:
+        return
+    layout_lock = True
+    try:
+        # Repack columns in the correct order
+        for estado in colunas:
+            colunas[estado]["frame_coluna"].pack_forget()
+        for estado in estados:
+            if estado in colunas and colunas[estado]["frame_coluna"].winfo_exists():
+                colunas[estado]["frame_coluna"].pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        atualizar_layout_colunas()
+    except Exception as e:
+        print(f"[ERROR] Erro ao reordenar colunas: {e}")
+        texto_detalhes.delete("1.0", tk.END)
+        texto_detalhes.insert(tk.END, f"⚠️ Erro ao reordenar colunas: {e}\n", "info")
+    finally:
+        layout_lock = False
+
+# Modified reordenar_colunas to avoid destroying widgets
+def reordenar_colunas():
+    global layout_lock
+    if layout_lock:
+        return
+    layout_lock = True
+    try:
+        # Only animate if called from soltar_coluna; otherwise, just update layout
+        for estado in estados:
+            if estado not in colunas:
+                criar_coluna(estado)
+        atualizar_layout_colunas()
+    except Exception as e:
+        print(f"[ERROR] Erro ao reordenar colunas: {e}")
+        texto_detalhes.delete("1.0", tk.END)
+        texto_detalhes.insert(tk.END, f"⚠️ Erro ao reordenar colunas: {e}\n", "info")
+    finally:
+        layout_lock = False
 
 # Função para reordenar colunas
 def reordenar_colunas():
